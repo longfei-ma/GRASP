@@ -1,5 +1,5 @@
 # GRASP: GRaph-Augmented Score Propagation for OOD detection
-This is the source code for ICML 2024 submitted paper [Score Propagation as a Catalyst for Graph Out-of-distribution Detection: A Theoretical and Empirical Study](https://openreview.net/forum?id=hfJ5KdJ4PK)).
+This is the source code for NeurIPS 2024 submitted paper [Revisiting Score Propagation in Graph Out-of-Distribution Detection](https://openreview.net/forum?id=jb5qN3212b).
 
 ## Dependence
 
