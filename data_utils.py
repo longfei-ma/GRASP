@@ -1,4 +1,5 @@
 import os
+import random
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -11,6 +12,13 @@ from baselines import Mahalanobis
 from torch_geometric.utils import to_dense_adj, dense_to_sparse
 import gdown
 
+
+def set_random_seed(seed: int) -> None:
+    """set seeds for controlled randomness"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
 
 def rand_splits(node_idx, train_prop=.5, valid_prop=.25):
     """ randomly splits label into train/valid/test splits """
@@ -246,6 +254,27 @@ def evaluate(model, dataset, split_idx, eval_func, result=None, sampling=False, 
         dataset.y[split_idx['valid']], out[split_idx['valid']])
     test_acc = eval_func(
         dataset.y[split_idx['test']], out[split_idx['test']])
+
+    return train_acc, valid_acc, test_acc, out
+
+@torch.no_grad()
+def evaluate_covariate(model, dataset, dataset2, split_idx, eval_func, result=None, sampling=False, subgraph_loader=None):
+    if result is not None:
+        out = result
+    else:
+        model.eval()
+        if not sampling:
+            out = model(dataset)
+            out2 = model(dataset2)
+        else:
+            out = model.inference(dataset, subgraph_loader)
+
+    train_acc = eval_func(
+        dataset.y[split_idx['train']], out[split_idx['train']])
+    valid_acc = eval_func(
+        dataset.y[split_idx['valid']], out[split_idx['valid']])
+    
+    test_acc = eval_func(dataset2.y, out2)
 
     return train_acc, valid_acc, test_acc, out
 

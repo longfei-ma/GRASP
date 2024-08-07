@@ -13,13 +13,14 @@ import os
 import torch_geometric.transforms as T
 
 from load_data import load_twitch, load_fb100, load_twitch_gamer, DATAPATH
-from data_utils import rand_train_test_idx, even_quantile_labels, to_sparse_tensor, dataset_drive_url
+from data_utils import rand_splits, rand_train_test_idx, even_quantile_labels, set_random_seed, dataset_drive_url
 
 from torch_geometric.datasets import Planetoid, Amazon, Coauthor, Reddit2, Actor, WebKB
 from torch_geometric.transforms import NormalizeFeatures
 from torch_sparse import SparseTensor
 from torch_geometric.data import Data
-from torch_geometric.utils import remove_self_loops
+from torch_geometric.utils import remove_self_loops, subgraph, mask_to_index, to_undirected
+from torch_geometric.utils.map import map_index
 from ogb.nodeproppred import NodePropPredDataset
 
 
@@ -79,45 +80,45 @@ class NCDataset(object):
         return '{}({})'.format(self.__class__.__name__, len(self))
 
 
-def load_dataset(dataname, ood_type, sub_dataname=''):
+def load_dataset(args, sub_dataname=''):
     """ Loader for NCDataset, returns NCDataset. """
-    if dataname == 'twitch-e':
+    if args.dataset == 'twitch-e':
         # twitch-explicit graph
         if sub_dataname not in ('DE', 'ENGB', 'ES', 'FR', 'PTBR', 'RU', 'TW'):
             print('Invalid sub_dataname, deferring to DE graph')
             sub_dataname = 'DE'
         dataset = load_twitch_dataset(sub_dataname)
-    elif dataname == 'fb100':
+    elif args.dataset == 'fb100':
         if sub_dataname not in ('Penn94', 'Amherst41', 'Cornell5', 'Johns Hopkins55', 'Reed98'):
             print('Invalid sub_dataname, deferring to Penn94 graph')
             sub_dataname = 'Penn94'
         dataset = load_fb100_dataset(sub_dataname)
-    elif dataname == 'ogbn-proteins':
+    elif args.dataset == 'ogbn-proteins':
         dataset = load_proteins_dataset()
-    elif dataname == 'deezer-europe':
+    elif args.dataset == 'deezer-europe':
         dataset = load_deezer_dataset()
-    elif dataname == 'arxiv-year':
+    elif args.dataset == 'arxiv-year':
         dataset_ind, dataset_ood_te = load_arxiv_year_dataset()
-    elif dataname == 'pokec':
+    elif args.dataset == 'pokec':
         dataset = load_pokec_mat()
-    elif dataname == 'snap-patents':
+    elif args.dataset == 'snap-patents':
         dataset_ind, dataset_ood_te = load_snap_patents_mat()
-    elif dataname == 'yelp-chi':
+    elif args.dataset == 'yelp-chi':
         dataset = load_yelpchi_dataset()
-    elif dataname in ('ogbn-arxiv', 'ogbn-products'):
-        dataset_ind, dataset_ood_te = load_ogb_dataset(dataname)
-    elif dataname in ('Cora', 'CiteSeer', 'PubMed'):
-        dataset = load_planetoid_dataset(dataname)
-    elif dataname in ('chameleon', 'cornell', 'film', 'squirrel', 'texas', 'wisconsin'):
-        dataset_ind, dataset_ood_te = load_geom_gcn_dataset(dataname)
-    elif dataname == "genius":
+    elif args.dataset in ('ogbn-arxiv', 'ogbn-products'):
+        dataset_ind, dataset_ood_te = load_ogb_dataset(args.dataset)
+    elif args.dataset in ('Cora', 'CiteSeer', 'PubMed'):
+        dataset = load_planetoid_dataset(args.dataset)
+    elif args.dataset in ('chameleon', 'cornell', 'film', 'squirrel', 'texas', 'wisconsin'):
+        dataset_ind, dataset_ood_te = load_geom_gcn_dataset(args.dataset)
+    elif args.dataset == "genius":
         dataset = load_genius()
-    elif dataname == "twitch-gamer":
+    elif args.dataset == "twitch-gamer":
         dataset = load_twitch_gamer_dataset() 
-    elif dataname == "wiki":
+    elif args.dataset == "wiki":
         dataset_ind, dataset_ood_te = load_wiki()
-    elif dataname in ('cora', 'amazon-photo', 'coauthor-cs', 'reddit2'):
-        dataset_ind, dataset_ood_te = load_graph_dataset(dataname, ood_type)
+    elif args.dataset in ('cora', 'amazon-photo', 'coauthor-cs', 'reddit2'):
+        dataset_ind, dataset_ood_te = load_graph_dataset(args)
     else:
         raise ValueError('Invalid dataname')
     return dataset_ind, dataset_ood_te
@@ -147,6 +148,7 @@ def create_feat_noise_dataset(data):
     return dataset
 
 def create_sbm_dataset(data, p_ii=1.5, p_ij=0.5):
+    from torch_geometric.utils import stochastic_blockmodel_graph
     n = data.num_nodes
     d = data.edge_index.size(1) / data.num_nodes / (data.num_nodes - 1)
     num_blocks = int(data.y.max()) + 1
@@ -159,28 +161,123 @@ def create_sbm_dataset(data, p_ii=1.5, p_ij=0.5):
 
     dataset = Data(x=data.x, edge_index=edge_index, y=data.y)
     dataset.node_idx = torch.arange(dataset.num_nodes)
+    return dataset
 
-    x = data.x
-    n = data.num_nodes
-    ood_num = int(n * 0.5)
-    torch.manual_seed(111)
-    ood_idx = torch.randperm(n)[:ood_num]
-    idx = torch.arange(n)
-    id_idx = idx[~torch.isin(idx, ood_idx)]
-    torch.manual_seed(222)
-    idx = torch.randint(0, ood_num, (ood_num, 2))
-    torch.manual_seed(333)
-    weight = torch.rand(ood_num).unsqueeze(1)
-    x[ood_idx] = x[idx[:, 0]] * weight + x[idx[:, 1]] * (1 - weight)
+def structure_shift_dataset(data, run, args, ood_budget_per_graph=0.1):
+    """perturb graph's egdges using the DICE attack
 
-    dataset_ind = Data(x=x, edge_index=data.edge_index, y=data.y)
-    dataset_ind.node_idx = id_idx
-    dataset_ood = Data(x=x, edge_index=data.edge_index, y=data.y)
-    dataset_ood.node_idx = ood_idx
+    Args:
+        data (torch_geometric.data.Data): data object representing the graph
+        ood_budget_per_graph (float, optional): fraction of perturbed edges in the graph. Defaults to 0.1.
 
-    return dataset_ind, dataset_ood
+    Returns:
+        Tuple[torch_geometric.data.Data, None]: tuple of perturbed graph data and None (for pipeline compatibility)
+    """
+    #performs a random attack on the graph structure
+    #budget corresponds to perturbed edges
+    #for each targeted community:
+    #    - remove delta = budget[%] x intra-community edges
+    #    - add delta cross-community edges vu, s.t. c_v != c_u
+    #'''
+    seed = run + args.seed
+    idx = torch.arange(data.num_nodes)
 
-def load_graph_dataset(dataname, ood_type='label'):
+    # extract directed edges of undirected edge_index
+    start, end = data.edge_index
+    mask = start < end
+    start, end = start[mask], end[mask]
+
+    # extract nodes belonging to community
+    num_classes = data.y.max() + 1
+    nodes_per_class = [None] * num_classes
+    for c in range(num_classes):
+        nodes_per_class[c] = torch.where(data.y == c)[0].tolist() #得到每个class对应的node
+
+    ood_idx = []
+    ood_edge_index = []
+
+    # for each community
+    for c in range(num_classes):
+        deleted_edges = []
+        intra_community_edges = torch.where((data.y[start] == c) & (data.y[end] == c))[0].tolist()#每个社区的intra-edges
+
+        # find all nodes from other communities
+        cross_community_nodes = []
+        for c_j in range(num_classes):
+            if c_j == c:
+                continue
+            cross_community_nodes.extend(nodes_per_class[c_j])
+
+        # calulcate budget
+        n_intra_edges = len(intra_community_edges)
+        budget = int(ood_budget_per_graph * n_intra_edges)
+
+        # sample deleted
+        set_seed(seed)
+        deleted_edges.extend(np.random.choice(intra_community_edges, budget, replace=False))#待去除的intra-edges
+
+        # first: sample community nodes, then sample corresponding cross-community nodes
+        n_c = nodes_per_class[c]
+        # set_seed(seed)
+        # community_nodes = np.random.choice(n_c, budget, replace=True) #本社区选中的节点
+        community_nodes = start[deleted_edges] #本社区选中的节点
+        ood_idx.extend(community_nodes.tolist())
+        set_seed(seed)
+        cross_community_nodes = np.random.choice(cross_community_nodes, budget, replace=True) #外社区选中的节点
+        ood_edge_index.append(torch.vstack([community_nodes, cross_community_nodes]))
+        # end[deleted_edges] = torch.as_tensor(cross_community_nodes)
+        ood_idx.extend(cross_community_nodes.tolist())
+
+    ood_edge_index = torch.concat(ood_edge_index, dim=1)
+    ood_edge_index = to_undirected(ood_edge_index)
+    ood_idx = np.unique(ood_idx)
+    ood_idx = torch.as_tensor(ood_idx)
+    ood_edge_index, _ = map_index(ood_edge_index.view(-1), ood_idx, inclusive=True)
+    ood_edge_index = ood_edge_index.view(2, -1)
+    # ood_edge_index = subgraph(ood_idx, edge_index, relabel_nodes=True)[0]
+    dataset_ood = Data(x=data.x[ood_idx], edge_index=ood_edge_index, y=data.y[ood_idx])
+
+    edge_index = data.edge_index
+    id_mask = torch.ones(data.num_nodes, dtype=bool)
+    id_mask[ood_idx] = 0
+    id_train_idx = mask_to_index(id_mask)
+    set_seed(seed)
+    split_idx = rand_splits(id_train_idx, args.train_prop, args.valid_prop)
+    test_id_idx = split_idx['test']
+    test_id_edge_index = subgraph(test_id_idx, edge_index, relabel_nodes=True)[0]
+    dataset_test_id = Data(x=data.x[test_id_idx], edge_index=test_id_edge_index, y=data.y[test_id_idx])
+
+    train_idx = torch.concat([split_idx['train'], split_idx['valid']])
+    train_id_edge_index = subgraph(train_idx, edge_index, relabel_nodes=True)[0]
+    dataset_train_id = Data(x=data.x[train_idx], edge_index=train_id_edge_index, y=data.y[train_idx])
+    new_split_idx = {'train': map_index(split_idx['train'], train_idx, inclusive=True)[0], 'valid': map_index(split_idx['valid'], train_idx, inclusive=True)[0]}
+    dataset_train_id.split_idx = new_split_idx
+
+    return dataset_train_id, dataset_test_id, dataset_ood
+
+def feature_shift_dataset(data, run, args, ood_budget_per_graph=0.1):
+    """perturb graph's egdges using the DICE attack
+
+    Args:
+        data (torch_geometric.data.Data): data object representing the graph
+        ood_budget_per_graph (float, optional): fraction of perturbed edges in the graph. Defaults to 0.1.
+
+    Returns:
+        Tuple[torch_geometric.data.Data, None]: tuple of perturbed graph data and None (for pipeline compatibility)
+    """
+    #performs a random attack on the graph structure
+    #budget corresponds to perturbed edges
+    #for each targeted community:
+    #    - remove delta = budget[%] x intra-community edges
+    #    - add delta cross-community edges vu, s.t. c_v != c_u
+    #'''
+    seed = run + args.seed
+    data.node_idx = torch.arange(data.num_nodes)
+    
+
+def load_graph_dataset(args):
+    dataname = args.dataset
+    ood_type = args.ood_type
     transform = T.NormalizeFeatures()
     if dataname in ('cora', 'citeseer', 'pubmed'):
         torch_dataset = Planetoid(root=f'{DATAPATH}Planetoid', split='public',
@@ -209,11 +306,9 @@ def load_graph_dataset(dataname, ood_type='label'):
     else:
         raise NotImplementedError
 
-    
-    dataset.node_idx = torch.arange(dataset.num_nodes)
     if ood_type == 'structure':
-        dataset_ind = dataset
-        dataset_ood_te = create_sbm_dataset(dataset, p_ii=1.5, p_ij=0.5)
+        dataset_ind, dataset_test_id, dataset_ood = structure_shift_dataset(dataset, args)
+        dataset_ood_te = (dataset_test_id, dataset_ood)
     elif ood_type == 'feature':
         dataset_ind = dataset
         dataset_ood_te = create_feat_noise_dataset(dataset)

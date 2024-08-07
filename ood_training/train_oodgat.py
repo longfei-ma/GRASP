@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from logger import Logger_detect
-from data_utils import evaluate_detect, eval_acc, eval_rocauc
+from data_utils import rand_splits, set_random_seed, evaluate_detect, eval_acc, eval_rocauc
 from torch_geometric.utils import to_undirected
 from dataset import load_dataset
 from parse import parse_method, parser_add_main_args
@@ -32,7 +32,7 @@ def fix_seed(seed):
 parser = argparse.ArgumentParser(description='General Training Pipeline')
 parser_add_main_args(parser)
 args = parser.parse_args()
-if args.ood_type=='label' and args.dataset in hparams:
+if args.dataset in hparams:
     for hname, v in hparams[args.dataset][args.method].items():
         setattr(args, hname, v)
 print(args)
@@ -46,20 +46,14 @@ else:
 
 
 ### Load and preprocess data ###
-dataset_ind, dataset_ood_te = load_dataset(args.dataset, args.ood_type)
+dataset_ind, dataset_ood_te = load_dataset(args.dataset)
 
 if len(dataset_ind.y.shape) == 1:
     dataset_ind.y = dataset_ind.y.unsqueeze(1)
-if isinstance(dataset_ood_te, list):
-    for data in dataset_ood_te:
-        if len(data.y.shape) == 1:
-            data.y = data.y.unsqueeze(1)
-else:
-    if len(dataset_ood_te.y.shape) == 1:
-        dataset_ood_te.y = dataset_ood_te.y.unsqueeze(1)
+if len(dataset_ood_te.y.shape) == 1:
+    dataset_ood_te.y = dataset_ood_te.y.unsqueeze(1)
 
-# get the splits for all runs
-split_idx_lst = torch.load(f'./data/splits/{args.ood_type}/{args.dataset}-splits.pt')
+ood_type = args.ood_type
 
 # infer the number of classes for non one-hot and one-hot labels
 n = dataset_ind.num_nodes
@@ -68,11 +62,7 @@ d = dataset_ind.x.shape[1]
 
 print(f"ind dataset {args.dataset}: all nodes {dataset_ind.num_nodes} | centered nodes {dataset_ind.node_idx.shape[0]} | edges {dataset_ind.edge_index.size(1)} | "
       + f"classes {c} | feats {d}")
-if isinstance(dataset_ood_te, list):
-    for i, data in enumerate(dataset_ood_te):
-        print(f"ood te dataset {i} {args.dataset}: all nodes {data.num_nodes} | centered nodes {data.node_idx.shape[0]} | edges {data.edge_index.size(1)}")
-else:
-    print(f"ood te dataset {args.dataset}: all nodes {dataset_ood_te.num_nodes} | centered nodes {dataset_ood_te.node_idx.shape[0]} | edges {dataset_ood_te.edge_index.size(1)}")
+print(f"ood te dataset {args.dataset}: all nodes {dataset_ood_te.num_nodes} | centered nodes {dataset_ood_te.node_idx.shape[0]} | edges {dataset_ood_te.edge_index.size(1)}")
 
 if args.dataset not in ["arxiv-year", "snap-patents"] and dataset_ind.is_directed():
     dataset_ind.edge_index = to_undirected(dataset_ind.edge_index)
@@ -96,7 +86,7 @@ else:
 
 ### logger for result report ###
 logger = Logger_detect(args.runs, args)
-model_dir = f'checkpoints/{args.ood_type}/{args.dataset}/{args.method}' #{args.ood}
+model_dir = f'checkpoints/{ood_type}/{args.dataset}/{args.method}' #{args.ood}
 print(model_dir)
 if not os.path.exists(model_dir):
     os.makedirs(model_dir)
@@ -112,7 +102,9 @@ durations = []
 for run in range(args.runs):
     t = time.time()
     print(f'----start time: {t}')
-    split_idx = split_idx_lst[run]
+    torch.manual_seed(run + args.seed)
+    set_random_seed(run + args.seed)
+    split_idx = rand_splits(dataset_ind.node_idx, train_prop=args.train_prop, valid_prop=args.valid_prop)
     dataset_ind.splits = split_idx
 
     model.reset_parameters()
@@ -182,7 +174,6 @@ with open(f"{filename}", 'a+') as write_obj:
         ood_name = f'{args.ood}+prop'
     else:
         ood_name = f'{args.ood}+{args.OODGAT_detect_type}'
-    ood_name += f'+{args.ood_type}'
     # auroc, aupr, fpr, id ACC, train time
     write_obj.write(f"{sub_dataset}" + f"{args.method},{ood_name}," + 
                     f"{result[:, 0].mean():.2f} ± {result[:, 0].std():.2f}," +

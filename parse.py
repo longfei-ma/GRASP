@@ -78,6 +78,7 @@ def parse_method(args, dataset, n, c, d, device='cpu'):
 
 def parser_add_main_args(parser):
     parser.add_argument('--dataset', type=str, default='cora')
+    parser.add_argument('--seed', type=int, help='Random seed', default=1)
     parser.add_argument('--ood_type', type=str, default='label', choices=['structure', 'label', 'feature'])
     parser.add_argument('--sub_dataset', type=str, default='')
     parser.add_argument('--hidden_channels', type=int, default=64)
@@ -95,7 +96,7 @@ def parser_add_main_args(parser):
     parser.add_argument('--cs_fixed', action='store_true', help='use FDiff-scale')
     parser.add_argument('--num_layers', type=int, default=2,
                         help='number of layers for deep methods')
-    parser.add_argument('--runs', type=int, default=1,
+    parser.add_argument('--runs', type=int, default=5,
                         help='number of distinct runs')
     parser.add_argument('--cached', action='store_true',
                         help='set to use faster sgc')
@@ -119,9 +120,9 @@ def parser_add_main_args(parser):
                         help='number of mlp layers in h2gcn')
     parser.add_argument('--print_prop', action='store_true',
                         help='print proportions of predicted class')
-    parser.add_argument('--train_prop', type=float, default=.5,
+    parser.add_argument('--train_prop', type=float, default=.1,
                         help='training label proportion')
-    parser.add_argument('--valid_prop', type=float, default=.25,
+    parser.add_argument('--valid_prop', type=float, default=.1,
                         help='validation label proportion')
     parser.add_argument('--adam', action='store_true', help='use adam instead of adamW')
     parser.add_argument('--rand_split', action='store_true', help='use random splits')
@@ -140,16 +141,19 @@ def parser_add_main_args(parser):
     parser.add_argument('--noise', type=float, default=0., help='param for baseline ODIN and Mahalanobis')
     parser.add_argument('--tau1', type=float, default=5, help='threshold to determine s_id and s_ood')
     parser.add_argument('--tau2', type=float, default=50, help='threshold to select train nodes as G')
-    parser.add_argument('--delta', type=float, default=1.02, help='weight for G')
+    parser.add_argument('--delta', type=float, default=1.001, help='weight for G')
     parser.add_argument('--prop', action='store_true', help='whether to use belief propagation')
     parser.add_argument('--prop_type', type=str, default='naive', choices=['naive', 'highorder', 'appnp', 'gdc', 'graphheat', 'gprgnn', 'mixhop'], help='what prop type to use')
     parser.add_argument('--rw', type=str, default='rw', help='use random walk or symmetric to prop')
     parser.add_argument('--grasp', action='store_true', help='whether to use GRASP')
     parser.add_argument('--test', action='store_true', help='whether to augmentate on test')
+    parser.add_argument('--GT', action='store_true', help='whether to use true sid and sood')
     parser.add_argument('--gaug', action='store_true', help='whether to use GAug')
     parser.add_argument('--add_pct', type=float, default=5, help='ratio of edges to add')
     parser.add_argument('--remove_pct', type=float, default=50, help='ratio of edges to remove')
-    parser.add_argument('--st', type=str, default='top', choices=['top', 'low', 'random'], help='what metric to use')
+    parser.add_argument('--st', type=str, default='top', choices=['top', 'low', 'random', 'test'], help='what metric to use')
+    parser.add_argument('--col', action='store_true', help='use col to count connections')
+    parser.add_argument('--adj1', action='store_true')
     # GPN
     #parser.add_argument('--mode', type=str, default='detect', choices=['classify', 'detect'])
     parser.add_argument('--GPN_detect_type', type=str, default='Epist', choices=['Alea', 'Epist', 'Epist_wo_Net'])
