@@ -1,5 +1,5 @@
 # GRASP: GRaph-Augmented Score Propagation for OOD detection
-This is the official implementation of NeurIPS2024 paper [Revisiting Score Propagation in Graph Out-of-Distribution Detection](https://openreview.net/forum?id=jb5qN3212b).
+This is the official implementation of NeurIPS'24 paper [Revisiting Score Propagation in Graph Out-of-Distribution Detection](https://openreview.net/forum?id=jb5qN3212b).
 
 
 ## Dependence
