@@ -31,7 +31,7 @@ The folder `ood_training` contains all codes for training-based methods `GKDE`, 
 
 ## Citation
 
-Please cite our paper if you find it helpful.
+Please cite our paper if you find it helpful. Thank you!
 ```
 @inproceedings{ma2024grasp,
  title = {Revisiting Score Propagation in Graph Out-of-Distribution Detection},
