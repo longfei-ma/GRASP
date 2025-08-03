@@ -28,3 +28,17 @@ Run `./scripts/test_ood.sh` to evaluate the performance of all post-hoc methods.
 ### 2. Training-based Methods
 
 The folder `ood_training` contains all codes for training-based methods `GKDE`, `GPN` and `OODGAT`. Enter folder `ood_training` and run `scripts/run.sh` to evaluate these methods.
+
+## Citation
+
+Please cite our paper if you find it helpful.
+```
+@inproceedings{ma2024grasp,
+ title = {Revisiting Score Propagation in Graph Out-of-Distribution Detection},
+ author = {Ma, Longfei and Sun, Yiyou and Ding, Kaize and Liu, Zemin and Wu, Fei},
+ booktitle = {Advances in Neural Information Processing Systems},
+ pages = {4341--4373},
+ volume = {37},
+ year = {2024}
+}
+```
